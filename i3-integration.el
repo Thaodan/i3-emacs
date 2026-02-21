@@ -61,19 +61,13 @@ will use all of them."
   :type 'function
   :group 'i3)
 
-(defun i3-advise-visible-frame-list-on ()
-  "Turns on advising of visible-frame-list function. This has the
-effect of (visible-frame-list) returning only frames that are
-situated on visible workspaces. This is the default."
-  (interactive)
-  (advice-add 'visible-frame-list :filter-return #'i3-visible-frame-list-filter))
-
-(defun i3-advise-visible-frame-list-off ()
-  "Turns off advising of visible-frame-list
-function. (visible-frame-list) will return all frames as i3,
-being a tiling wm, does not have minimized windows concept."
-  (interactive)
-  (advice-remove 'visible-frame-list #'i3-visible-frame-list-filter))
+(defcustom i3-window-list-frame-visible-function 'i3-get-visible-windows-ids
+  "Function to select the visible frame when listing windows.
+Filters windows for use all functions that try to find visible windows."
+  :type '(choice (function-item i3-collect-only-visible-windows)
+                 (function-item i3-get-visible-workspace-window-ids)
+                 (function :tag "Custom function"))
+  :group 'i3)
 
 (defun i3-one-window-per-frame-mode-on ()
   "Turns on one window per frame mode. After switching it on,
@@ -125,29 +119,88 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
                            visible-frame-list))
     (error visible-frame-list)))
 
+
+;; To be less confusing these functions refer to i3 windows as frames
+;; as they only handle i3 windows which are Emacs frames.
+
+(defvar i3-filter--frames-visible nil
+  "Internal variable to cache visible window-ids to avoid repeated calls.")
+
+;;;###autoload
+(defun i3-filter--frame-visible-set ()
+  "Set list of frames considered visible.
+Determined according to `i3-window-list-frame-visible-function'."
+  (setq i3-filter--frames-visible (or (and i3-window-list-frame-visible-function
+                                            (funcall i3-window-list-frame-visible-function))
+                                       ;; Have a fallback, we don't want to break Emacs
+                                       ;; when this is set wrong.
+                                       (i3-get-visible-windows-ids))))
+
+;;;###autoload
+(defun i3-filter-frame-visible-p (frame)
+  "Return t if FRAME is visible."
+  (when-let* ((frame-outer-id (frame-parameter frame 'outer-window-id))
+              (frame-outer-id (string-to-number frame-outer-id)))
+    (i3-filter--frame-visible-set)
+    (if (memq frame-outer-id i3-filter--frames-visible) t)))
+
+;;;###autoload
+(defun i3-filter-window-visible-p (window)
+  "Return non-nil if WINDOW is visible."
+  (i3-filter-frame-visible-p (window-frame window)))
+
+;;;###autoload
+(defun i3-filter-window-list-1-filter-all-frames-visible (old-func &optional window minibuf all-frames)
+  "Filter the visible WINDOW(S) returned by OLD-FUNC.
+
+If ALL-FRAMES is either \='visible\=' or \='0\=' filter them.
+Else just call the advised function regularly."
+  (if (or (eq all-frames 'visible)
+          (eq all-frames 0))
+      (let* ((windows (funcall old-func window minibuf all-frames)))
+        (i3-filter--frame-visible-set)
+        (seq-filter #'i3-filter-window-visible-p windows))
+    (funcall old-func window minibuf all-frames)))
+
 (defun i3-get-visible-workspace-names ()
+  "Return any i3 workspace which is visible on any of the current screen(s)."
   (seq-keep (lambda(w) (when (i3-field-is 'visible #'eq t w)
                                   (i3-field 'name w)))
-                     (i3-get-workspaces)))
+            (i3-get-workspaces)))
 
+;;;###autoload
 (defun i3-get-visible-windows ()
+  "Return visible windows according to `i3-collect-windows-function'."
+  (i3-filter--visible-frames i3-collect-windows-function))
+
+;;;###autoload
+(defun i3-filter--visible-frames (predicate)
+  "Return visible window according to PREDICATE."
   (let ((visible-workspace-names (i3-get-visible-workspace-names)))
     (i3-flatten
-     (mapcar i3-collect-windows-function
-             (i3-flatten (seq-keep (lambda(w)
-                                              (when (i3-field-is 'name #'member visible-workspace-names w)
-                                                (append (i3-field 'nodes w) nil)));convert vector to list
-                                            (i3-collect-workspaces (i3-get-tree-layout))))))))
+    (mapcar predicate
+              (car (seq-keep (lambda(w)
+                               (when (i3-field-is 'name #'member visible-workspace-names w)
+                                 (append (i3-field 'nodes w) nil)));convert vector to list
+                             (i3-collect-workspaces (i3-get-tree-layout))))))))
 
+;;;###autoload
 (defun i3-get-visible-windows-ids ()
+  "Return window-id's of all currently visible windows."
   (mapcar (apply-partially #'i3-field 'window) (i3-get-visible-windows)))
+
+;;;###autoload
+(defun i3-get-visible-workspace-window-ids ()
+  "Return window-id's of all windows on currently visible workspaces.
+Also returns windows which are on top of other windows."
+  (mapcar (apply-partially #'i3-field 'window) (i3-filter--visible-frames #'i3-collect-all-windows)))
 
 (defun i3-collect-entities (checkp)
   (letrec ((collect (lambda (root)
                       (if (funcall checkp root)
                           (list root)
                         (i3-flatten (seq-keep collect
-                                                       (i3-field 'nodes root)))))))
+                                              (i3-field 'nodes root)))))))
     collect))
 
 (defalias 'i3-collect-workspaces
@@ -158,7 +211,11 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 (defalias 'i3-collect-all-windows
   (i3-collect-entities (apply-partially #'i3-field 'window)))
 
+;;;###autoload
 (defun i3-collect-only-visible-windows (root)
+  "Return all windows on ROOT which are considered visible.
+
+Visible means that they are on any of the layouts which are currently on top."
   (if (i3-field 'window root)
       (list root)
     (let* ((folded (i3-field-is 'layout #'member '("tabbed" "stacked") root))
@@ -245,15 +302,37 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 (defun i3-display-buffer-use-some-frame (buffer alist)
   (ignore alist)
   (when (and (display-graphic-p)
-             (not (or (member (buffer-name buffer) '("*Completions*" " *undo-tree*"))
-                      (string-match-p "\\`[*][Hh]elm.*[*]\\'" (buffer-name buffer)))))
+             (not (or (member (buffer-name buffer)
+                              ;; FIXME: Should have defcustom
+                              '("*Completions*" " *undo-tree*"))
+                      (string-match-p "\\`[*][Hh]elm.*[*]\\'"
+                                      (buffer-name buffer)))))
     (let* ((frame (i3-get-popup-frame-for-buffer buffer))
            (window (i3-get-window-for-frame frame)))
       (window--display-buffer buffer window 'reuse))))
 
 ;;; Set defaults
-(i3-advise-visible-frame-list-on)
+;;;###autoload
+(define-minor-mode i3-integration-mode
+  "Global minor mode to make Emacs aware of i3's window visibility state.
+Ensures `visible-frame-list' will only return visible windows.
+Same for `display-buffer'."
+  :global t :group 'i3
+  :init-value t
+  :initialize
+  (lambda (symbol exp)
+    (custom-initialize-default symbol exp)
+    (when i3-integration-mode
+      (advice-add #'visible-frame-list :filter-return #'i3-visible-frame-list-filter)
+      (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible)))
+  (let ((enable (if (eq arg 'toggle)
+                    (not i3-integration-mode)
+                  (> (prefix-numeric-value arg) 0))))
+    (if enable
+        (progn
+          (advice-add #'visible-frame-list :filter-return #'i3-visible-frame-list-filter)
+          (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible))
+      (progn (advice-remove #'visible-frame-list #'i3-visible-frame-list-filter)
+             (advice-remove #'window-list-1 #'i3-filter-window-list-1-filter-all-frames-visible)))))
 
 (provide 'i3-integration)
-
-
