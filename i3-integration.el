@@ -6,7 +6,9 @@
 
 ;; Author:  Vadim Atlygin <vadim.atlygin@gmail.com>
 ;; Version: 0.1
-;; Package-Requires: ((emacs "24.3"))
+;; Package-Requires: (
+;;     (emacs "24.3")
+;;     (seq      "2.24"))
 
 ;; Redistribution and use in source and binary forms, with or without
 ;; modification, are permitted provided that the following conditions are met:
@@ -42,6 +44,13 @@
 
 (require 'i3)
 (require 'cl-lib)
+;; For older Emacs releases we depend on an updated `seq' release from GNU
+;; ELPA, for `seq-keep'.  Unfortunately something else may require `seq'
+;; before `package' had a chance to put this version on the `load-path'.
+(when (and (featurep 'seq)
+           (not (fboundp 'seq-keep)))
+  (unload-feature 'seq 'force))
+(require 'seq)
 
 (defcustom i3-collect-windows-function 'i3-collect-only-visible-windows
   "Function used to select windows when used in
@@ -109,7 +118,7 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 (defun i3-filter-visible-frame-list (visible-frame-list)
   (condition-case nil
       (let ((visible-window-ids (i3-get-visible-windows-ids)))
-        (i3-map-and-filter (lambda(f)
+        (seq-keep (lambda(f)
                              (when (member (string-to-number (frame-parameter f 'outer-window-id))
                                            visible-window-ids)
                                f))
@@ -117,7 +126,7 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
     (error visible-frame-list)))
 
 (defun i3-get-visible-workspace-names ()
-  (i3-map-and-filter (lambda(w) (when (i3-field-is 'visible #'eq t w)
+  (seq-keep (lambda(w) (when (i3-field-is 'visible #'eq t w)
                                   (i3-field 'name w)))
                      (i3-get-workspaces)))
 
@@ -125,7 +134,7 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
   (let ((visible-workspace-names (i3-get-visible-workspace-names)))
     (i3-flatten
      (mapcar i3-collect-windows-function
-             (i3-flatten (i3-map-and-filter (lambda(w)
+             (i3-flatten (seq-keep (lambda(w)
                                               (when (i3-field-is 'name #'member visible-workspace-names w)
                                                 (append (i3-field 'nodes w) nil)));convert vector to list
                                             (i3-collect-workspaces (i3-get-tree-layout))))))))
@@ -137,7 +146,7 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
   (letrec ((collect (lambda (root)
                       (if (funcall checkp root)
                           (list root)
-                        (i3-flatten (i3-map-and-filter collect
+                        (i3-flatten (seq-keep collect
                                                        (i3-field 'nodes root)))))))
     collect))
 
@@ -157,7 +166,7 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
            (children (if folded
                          (list (cl-find-if (apply-partially #'i3-field-is 'id #'eq id) (i3-field 'nodes root)))
                        (i3-field 'nodes root))))
-      (i3-flatten (i3-map-and-filter #'i3-collect-only-visible-windows children)))))
+      (i3-flatten (seq-keep #'i3-collect-only-visible-windows children)))))
 
 ;;; Helper functions
 
@@ -170,9 +179,6 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 (defun i3-field-is (symbol pred compare alist)
   (funcall pred (i3-field symbol alist) compare))
 
-(defun i3-map-and-filter (function list)
-  (delq nil (mapcar function list)))
-
 (defun i3-get-frame-buffer (frame)
   (car (frame-parameter frame 'buffer-list)))
 
@@ -180,12 +186,12 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
   (float-time (frame-parameter frame 'i3-frame-selected-time)))
 
 (defun i3-filter-all-but-special-buffer-frames (frames)
-  (i3-map-and-filter (lambda (f) (when (not (buffer-file-name (i3-get-frame-buffer f)))
+  (seq-keep (lambda (f) (when (not (buffer-file-name (i3-get-frame-buffer f)))
                                    f))
                      frames))
 
 (defun i3-filter-frames-by-buffer (buffer frames)
-  (i3-map-and-filter (lambda(f)
+  (seq-keep (lambda(f)
                        (when (memq buffer (frame-parameter f 'buffer-list))
                          f))
                      frames))
@@ -212,7 +218,7 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 
 (defun i3-filter-other-display-frames (frames)
   (let ((selected-display (frame-parameter (selected-frame) 'display)))
-    (i3-map-and-filter (lambda(f)
+    (seq-keep (lambda(f)
                          (when (and (not (frame-parameter f 'tty))
                                     (not (frame-parameter f 'i3-ignore-frame))
                                     (eq (frame-parameter f 'display) selected-display))
