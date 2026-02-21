@@ -141,7 +141,6 @@ Determined according to `i3-window-list-frame-visible-function'."
   "Return t if FRAME is visible."
   (when-let* ((frame-outer-id (frame-parameter frame 'outer-window-id))
               (frame-outer-id (string-to-number frame-outer-id)))
-    (i3-filter--frame-visible-set)
     (if (memq frame-outer-id i3-filter--frames-visible) t)))
 
 ;;;###autoload
@@ -158,7 +157,6 @@ Else just call the advised function regularly."
   (if (or (eq all-frames 'visible)
           (eq all-frames 0))
       (let* ((windows (funcall old-func window minibuf all-frames)))
-        (i3-filter--frame-visible-set)
         (seq-filter #'i3-filter-window-visible-p windows))
     (funcall old-func window minibuf all-frames)))
 
@@ -324,15 +322,18 @@ Same for `display-buffer'."
     (custom-initialize-default symbol exp)
     (when i3-integration-mode
       (advice-add #'visible-frame-list :filter-return #'i3-visible-frame-list-filter)
-      (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible)))
+      (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible)
+      (add-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)))
   (let ((enable (if (eq arg 'toggle)
                     (not i3-integration-mode)
                   (> (prefix-numeric-value arg) 0))))
     (if enable
         (progn
           (advice-add #'visible-frame-list :filter-return #'i3-visible-frame-list-filter)
-          (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible))
+          (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible)
+          (add-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set))
       (progn (advice-remove #'visible-frame-list #'i3-visible-frame-list-filter)
-             (advice-remove #'window-list-1 #'i3-filter-window-list-1-filter-all-frames-visible)))))
+             (advice-remove #'window-list-1 #'i3-filter-window-list-1-filter-all-frames-visible)
+             (remove-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)))))
 
 (provide 'i3-integration)
