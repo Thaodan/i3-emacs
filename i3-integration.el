@@ -177,7 +177,7 @@ Else just call the advised function regularly."
   (let ((visible-workspace-names (i3-get-visible-workspace-names)))
     (i3-flatten
     (mapcar predicate
-              (car (seq-keep (lambda(w)
+              (i3-flatten (seq-keep (lambda(w)
                                (when (i3-field-is 'name #'member visible-workspace-names w)
                                  (append (i3-field 'nodes w) nil)));convert vector to list
                              (i3-collect-workspaces (i3-get-tree-layout))))))))
