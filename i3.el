@@ -116,6 +116,7 @@ See i3 wm IPC docs for details of COMMAND numbers and PAYLOAD."
                                             :family 'local
                                             :filter #'i3-response-filter
                                             :sentinel #'i3-sentinel
+                                            :nowait t
                                             :service (i3-chomp (shell-command-to-string "i3 --get-socketpath")))))
   i3-client)
 

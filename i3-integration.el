@@ -52,6 +52,8 @@
   (unload-feature 'seq 'force))
 (require 'seq)
 
+(require 'async)
+
 (defcustom i3-collect-windows-function 'i3-collect-only-visible-windows
   "Function used to select windows when used in
 one-window-per-frame mode. You can choose between
@@ -126,15 +128,41 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 (defvar i3-filter--frames-visible nil
   "Internal variable to cache visible window-ids to avoid repeated calls.")
 
+(defvar i3-filter--frames-visible-set-inprogresss nil)
+
+
+(defmacro i3-filter--frame-visible-set-async-start (function lp)
+  `(lambda ()
+     (setq load-path ,lp)
+     (require 'i3-integration)
+     (funcall ,function)))
+
 ;;;###autoload
 (defun i3-filter--frame-visible-set ()
   "Set list of frames considered visible.
 Determined according to `i3-window-list-frame-visible-function'."
-  (setq i3-filter--frames-visible (or (and i3-window-list-frame-visible-function
-                                            (funcall i3-window-list-frame-visible-function))
-                                       ;; Have a fallback, we don't want to break Emacs
-                                       ;; when this is set wrong.
-                                       (i3-get-visible-windows-ids))))
+    (unless i3-filter--frames-visible-set-inprogresss
+      (setq i3-filter--frames-visible-set-inprogresss t)
+            ;; FIXME: Suspend timers. We don't want that they
+            ;; run while talking to i3.
+      ;; FIXME: Do async, call function async.
+      ;; FIXME: Check which of these are actually Emacs frames
+      (let ((load--path load-path))
+        (async-start (i3-filter--frame-visible-set-async-start
+                      `,(or i3-window-list-frame-visible-function
+                          ;; Have a fallback, we don't want to break Emacs
+                          ;; when this is set wrong.
+                          #'i3-get-visible-windows-ids)
+                      load--path)
+      #'i3-filter--frame-visible-set-async-callback))))
+
+
+(defun i3-filter--frame-visible-set-async-callback (result)
+  (when (listp result)
+    (setq i3-filter--frames-visible result))
+  (setq i3-filter--frames-visible-set-inprogresss nil)
+  result)
+
 
 ;;;###autoload
 (defun i3-filter-frame-visible-p (frame)
@@ -325,7 +353,7 @@ Same for `display-buffer'."
       (advice-add #'window-list-1 :around #'i3-filter-window-list-1-filter-all-frames-visible)
       (add-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)))
   (let ((enable (if (eq arg 'toggle)
-                    (not i3-integration-mode)
+                    i3-integration-mode
                   (> (prefix-numeric-value arg) 0))))
     (if enable
         (progn
