@@ -131,36 +131,38 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 (defvar i3-filter--frames-visible-set-inprogresss nil)
 
 
-(defmacro i3-filter--frame-visible-set-async-start (function lp)
+(defmacro i3-filter--async-start (variables &rest body)
+  "Define lambda with BODY with VARIABLES bound from caller.
+For use within `async-start'.
+Variables are bound with `async-inject-variables'"
   `(lambda ()
-     (setq load-path ,lp)
+     (setq load-path ',load-path)
      (require 'i3-integration)
-     (funcall ,function)))
+     ,(async-inject-variables variables)
+     ,@body))
 
 ;;;###autoload
 (defun i3-filter--frame-visible-set ()
   "Set list of frames considered visible.
 Determined according to `i3-window-list-frame-visible-function'."
-    (unless i3-filter--frames-visible-set-inprogresss
-      (setq i3-filter--frames-visible-set-inprogresss t)
-            ;; FIXME: Suspend timers. We don't want that they
-            ;; run while talking to i3.
-      ;; FIXME: Do async, call function async.
-      ;; FIXME: Check which of these are actually Emacs frames
-      (let ((load--path load-path))
-        (async-start (i3-filter--frame-visible-set-async-start
-                      `,(or i3-window-list-frame-visible-function
-                          ;; Have a fallback, we don't want to break Emacs
-                          ;; when this is set wrong.
-                          #'i3-get-visible-windows-ids)
-                      load--path)
-      #'i3-filter--frame-visible-set-async-callback))))
+    ;; Remove hook until we are done, we will re-add it.
+    (remove-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)
+    ;; FIXME: Check which of these are actually Emacs frames
+    (async-start (i3-filter--async-start
+                  "i3-window-list-frame-visible-function"
+                  (funcall
+                   (or i3-window-list-frame-visible-function
+                       ;; Have a fallback, we don't want to break Emacs
+                       ;; when this is set wrong.
+                       #'i3-get-visible-windows-ids)))
+                 #'i3-filter--frame-visible-set-async-callback))
 
 
 (defun i3-filter--frame-visible-set-async-callback (result)
+  "Handle RESULT and re-enable hook."
   (when (listp result)
     (setq i3-filter--frames-visible result))
-  (setq i3-filter--frames-visible-set-inprogresss nil)
+  (add-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)
   result)
 
 
