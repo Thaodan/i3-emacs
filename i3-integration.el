@@ -184,7 +184,9 @@ If ALL-FRAMES is either \='visible\=' or \='0\=' filter them.
 Else just call the advised function regularly."
   (if (or (eq all-frames 'visible)
           (eq all-frames 0))
-      (let* ((windows (funcall old-func window minibuf all-frames)))
+      ;; We have to call `window-list-1' with 't' i.e. listing all windows
+      ;; so we can filter it after ourselves.
+      (let* ((windows (funcall old-func window minibuf t)))
         (seq-filter #'i3-filter-window-visible-p windows))
     (funcall old-func window minibuf all-frames)))
 
