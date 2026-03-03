@@ -130,32 +130,26 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 
 (defvar i3-filter--frames-visible-set-inprogresss nil)
 
-
-(defmacro i3-filter--async-start (variables &rest body)
-  "Define lambda with BODY with VARIABLES bound from caller.
-For use within `async-start'.
-Variables are bound with `async-inject-variables'"
-  `(lambda ()
-     (setq load-path ',load-path)
-     (require 'i3-integration)
-     ,(async-inject-variables variables)
-     ,@body))
-
 ;;;###autoload
 (defun i3-filter--frame-visible-set ()
   "Set list of frames considered visible.
 Determined according to `i3-window-list-frame-visible-function'."
-    ;; Remove hook until we are done, we will re-add it.
-    (remove-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)
-    ;; FIXME: Check which of these are actually Emacs frames
-    (async-start (i3-filter--async-start
-                  "i3-window-list-frame-visible-function"
-                  (funcall
-                   (or i3-window-list-frame-visible-function
-                       ;; Have a fallback, we don't want to break Emacs
-                       ;; when this is set wrong.
-                       #'i3-get-visible-windows-ids)))
-                 #'i3-filter--frame-visible-set-async-callback))
+  ;; Remove hook until we are done, we will re-add it.
+  (remove-hook 'window-configuration-change-hook #'i3-filter--frame-visible-set)
+  (async-start
+   `(lambda ()
+      ,(async-inject-variables (regexp-opt '("load-path"
+                                             "i3-window-list-frame-visible-function")))
+      (require 'i3-integration)
+      ;; NOTE: Some of these non-windows Emacs are not Emacs frames
+      ;;       but it's not worth to filter them only use these numbers
+      ;;       to check later if a number that is a Emacs frame is part of them.
+      (funcall
+       (or i3-window-list-frame-visible-function
+           ;; Have a fallback, we don't want to break Emacs
+           ;; when this is set wrong.
+           #'i3-get-visible-windows-ids)))
+   #'i3-filter--frame-visible-set-async-callback))
 
 
 (defun i3-filter--frame-visible-set-async-callback (result)
