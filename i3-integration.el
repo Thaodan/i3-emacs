@@ -111,9 +111,21 @@ kind of buffers or least recently used ones. Works only in Emacs 24."
 
 ;;; i3 dependent pieces
 
+
+(defvar i3-filter--visible-frame-list-cache nil)
+(defvar i3-filter--visible-frame-list-cache-mtime nil)
+
+(defun i3-filter--visible-windows-cache ()
+  (when (or (not i3-filter--visible-frame-list-cache)
+            (not (time-less-p (time-subtract (current-time) i3-filter--visible-frame-list-cache-mtime)
+                              `,(time-convert (seconds-to-time 1) nil))))
+    (setq i3-filter--visible-frame-list-cache (i3-get-visible-windows-ids))
+    (setq i3-filter--visible-frame-list-cache-mtime (current-time))
+    i3-filter--visible-frame-list-cache))
+
 (defun i3-filter-visible-frame-list (visible-frame-list)
   (condition-case nil
-      (let ((visible-window-ids (i3-get-visible-windows-ids)))
+      (let ((visible-window-ids (i3-filter--visible-windows-cache)))
         (seq-keep (lambda(f)
                              (when (member (string-to-number (frame-parameter f 'outer-window-id))
                                            visible-window-ids)
