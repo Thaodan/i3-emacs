@@ -134,8 +134,10 @@ See i3 wm IPC docs for details of COMMAND numbers and PAYLOAD."
     (process-put proc 'response (process-get proc 'partial-response))
     (process-put proc 'partial-response nil)))
 
-(defun i3-sentinel (_proc _event)
-  (setq i3-client nil))
+(defun i3-sentinel (_proc event)
+  (unless (or (equal "open\n" event)
+              (equal "run\n" event))
+    (setq i3-client nil)))
 
 (defun i3-chomp (string)
   (replace-regexp-in-string "\n$" "" string))
